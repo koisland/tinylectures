@@ -5,7 +5,7 @@ mod image;
 mod map;
 mod player;
 
-fn main() {
+fn main() -> eyre::Result<()> {
     const FNAME: &str = "./out.ppm";
 
     // Parse map.
@@ -19,11 +19,11 @@ fn main() {
     };
 
     // Then add map and player.
-    image.draw_map(&map);
-    image.draw_player(&player, &map);
+    image.draw_map(&map)?;
+    image.draw_player(&player, &map)?;
     // Draw ray for player perspective
-    image.draw_ray(player.x, player.y, player.a, &map);
+    image.draw_ray(player.x, player.y, player.a, &map)?;
 
     // Before dumping to outfile.
-    image.dump(FNAME).unwrap();
+    image.dump(FNAME)
 }

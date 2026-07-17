@@ -1,4 +1,6 @@
-use std::{error::Error, fs::File, io::Write};
+use std::{fs::File, io::Write};
+
+use eyre::bail;
 
 use crate::{color::Color, map::Map, player::Player};
 
@@ -25,7 +27,7 @@ impl<const W: usize, const H: usize> Image<W, H> {
 
     /// Write PPM file.
     /// https://netpbm.sourceforge.net/doc/ppm.html
-    pub fn dump(&self, fname: &str) -> Result<(), Box<dyn Error>> {
+    pub fn dump(&self, fname: &str) -> eyre::Result<()> {
         // Check images is correct size as given width and height.
         let mut fh = File::create(fname)?;
         // Write magic number identifying file type, w, h, max color value. All delimited by newline.
@@ -44,21 +46,24 @@ impl<const W: usize, const H: usize> Image<W, H> {
         Ok(())
     }
 
-    pub fn draw_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: Color) {
+    pub fn draw_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: Color) -> eyre::Result<()> {
         // Loop thru length and width adding px by px.
         for i in 0..w {
             for j in 0..h {
                 let cx = x + i;
                 let cy = y + j;
                 // eprintln!("({cx}, {cy})");
-                assert!(cx < W && cy < H, "out of bounds");
+                if cx > W || cy > H {
+                    bail!("out of bounds for (x: {x}, y: {y}, w: {w}, h: {h})")
+                }
                 self.buffer[cx + cy * W] = color;
             }
         }
+        Ok(())
     }
 
     // TODO: Maybe move to Map.
-    pub fn draw_map(&mut self, map: &Map) {
+    pub fn draw_map(&mut self, map: &Map) -> eyre::Result<()> {
         let rect_w = W / map.w;
         let rect_h = H / map.h;
         eprintln!("Rects (w: {rect_w}, h: {rect_h})");
@@ -70,18 +75,20 @@ impl<const W: usize, const H: usize> Image<W, H> {
                 let rect_x = x * rect_w;
                 let rect_y = y * rect_h;
                 eprintln!("At ({x},{y}) draw {tile:?} tile at ({rect_x}, {rect_y}) ");
-                self.draw_rect(rect_x, rect_y, rect_w, rect_h, color);
+                self.draw_rect(rect_x, rect_y, rect_w, rect_h, color)?;
             }
         }
+        Ok(())
     }
 
-    pub fn draw_player(&mut self, player: &Player, map: &Map) {
+    pub fn draw_player(&mut self, player: &Player, map: &Map) -> eyre::Result<()> {
         let rect_w = W / map.w;
         let rect_h = H / map.h;
         // Convert from coordinates to image dim
         let x = (player.x * rect_w as f32) as usize;
         let y = (player.y * rect_h as f32) as usize;
-        self.draw_rect(x, y, 5, 5, Color::new(255, 255, 255, None));
+        self.draw_rect(x, y, 5, 5, Color::new(255, 255, 255, None))?;
+        Ok(())
     }
 
     /// # Drawing a ray.
@@ -108,28 +115,29 @@ impl<const W: usize, const H: usize> Image<W, H> {
     /// * `y = p_y + c * sin(p_angle)`
     ///
     /// This function returns the distance (length of c) to the endpoint of the ray.
-    pub fn draw_ray(&mut self, x: f32, y: f32, a: f32, map: &Map) -> f32 {
-        const INC: f32 = 0.05;
-        let mut c: f32 = 0.0;
+    pub fn draw_ray(&mut self, x: f32, y: f32, ang: f32, map: &Map) -> eyre::Result<f32> {
         let rect_w = (W / map.w) as f32;
         let rect_h = (H / map.h) as f32;
 
         // We don't include a limit (20) unlike the src
+        const INC: f32 = 0.05;
+        let mut c: f32 = 0.0;
         loop {
-            let cx = x + c * a.cos();
-            let cy = y + c * a.sin();
+            let cx = x + c * ang.cos();
+            let cy = y + c * ang.sin();
 
             // Out of bounds or hit an object
             if map.tile(cx as usize, cy as usize).is_none_or(|t| t != " ") {
-                return c;
+                break;
             };
 
             // Otherwise, draw ray
             let px_x = (cx * rect_w) as usize;
             let px_y = (cy * rect_h) as usize;
-            self.draw_rect(px_x, px_y, 1, 1, Color::new(255, 255, 255, None));
+            self.draw_rect(px_x, px_y, 1, 1, Color::new(255, 255, 255, None))?;
 
             c += INC
         }
+        return Ok(c)
     }
 }
