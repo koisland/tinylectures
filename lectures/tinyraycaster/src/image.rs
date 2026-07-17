@@ -46,7 +46,14 @@ impl<const W: usize, const H: usize> Image<W, H> {
         Ok(())
     }
 
-    pub fn draw_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: Color) -> eyre::Result<()> {
+    pub fn draw_rect(
+        &mut self,
+        x: usize,
+        y: usize,
+        w: usize,
+        h: usize,
+        color: Color,
+    ) -> eyre::Result<()> {
         // Loop thru length and width adding px by px.
         for i in 0..w {
             for j in 0..h {
@@ -81,6 +88,7 @@ impl<const W: usize, const H: usize> Image<W, H> {
         Ok(())
     }
 
+    // TODO: Refactor draw_* to take a struct that implents and Entity trait
     pub fn draw_player(&mut self, player: &Player, map: &Map) -> eyre::Result<()> {
         let rect_w = W / map.w;
         let rect_h = H / map.h;
@@ -138,6 +146,35 @@ impl<const W: usize, const H: usize> Image<W, H> {
 
             c += INC
         }
-        return Ok(c)
+        Ok(c)
+    }
+
+    /// Generate the field-of-view of the player
+    ///
+    /// ```no_run
+    ///    ------
+    ///   /2\2 \1
+    /// f/   \d \
+    /// ```
+    ///
+    /// * 1 is the angle between x-axis and fov angle
+    /// * 2 is the fov angle centered on the player's direction angle
+    /// * Add both together to calculate the fov
+    ///
+    /// We iterate over the width because it is the hypotenuse of the FOV tri/cone.
+    pub fn draw_fov(&mut self, player: &Player, map: &Map) -> eyre::Result<()> {
+        let fw: f32 = W as f32;
+        // Angle between x-axis and fov
+        // Direction - (FOV / 2)
+        let pt_1 = player.direction - player.fov / 2.;
+        for i in 0..W {
+            // The rest of the FOV angle drawn section by section.
+            // width of image is used because is hypotenuse. cone should extend to cover all of it.
+            // (FOV * 0..512) / 512.
+            let pt_2 = player.fov * (i as f32 / fw);
+            let angle = pt_1 + pt_2;
+            self.draw_ray(player.x, player.y, angle, map)?;
+        }
+        Ok(())
     }
 }

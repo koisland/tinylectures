@@ -1,3 +1,5 @@
+use std::f32::consts::PI;
+
 use crate::{image::Image, map::Map, player::Player};
 
 mod color;
@@ -12,17 +14,19 @@ fn main() -> eyre::Result<()> {
     let map = Map::new("lectures/tinyraycaster/data/map.txt");
     // With initialization function.
     let mut image = Image::<512, 512>::new(|_h, _w| (0, 0, 0));
+    // TODO: Allow setting fov in degrees but internally use radians.
     let player = Player {
         x: 3.456,
         y: 2.345,
-        a: 1.523,
+        direction: 1.523,
+        fov: PI / 3.0,
     };
 
     // Then add map and player.
     image.draw_map(&map)?;
     image.draw_player(&player, &map)?;
-    // Draw ray for player perspective
-    image.draw_ray(player.x, player.y, player.a, &map)?;
+    // Draw fov for player
+    image.draw_fov(&player, &map)?;
 
     // Before dumping to outfile.
     image.dump(FNAME)
