@@ -16,7 +16,6 @@ impl<const W: usize, const H: usize> Image<W, H> {
         // Iterate through window pixels and fill with color gradient.
         for h in 0..H {
             for w in 0..W {
-                // Vary the red channel between 0-255 as h sweeps vertical.
                 let (r, g, b) = f(h, w);
                 // Access index of one-dim array.
                 buffer[w + h * W] = Color::new(r, g, b, None)
@@ -169,7 +168,6 @@ impl<const W: usize, const H: usize> Image<W, H> {
         let pt_1 = player.direction - player.fov / 2.;
         for i in 0..W {
             // The rest of the FOV angle drawn section by section.
-            // width of image is used because is hypotenuse. cone should extend to cover all of it.
             // (FOV * 0..512) / 512.
             let pt_2 = player.fov * (i as f32 / fw);
             let angle = pt_1 + pt_2;

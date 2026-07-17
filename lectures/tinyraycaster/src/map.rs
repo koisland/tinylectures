@@ -1,3 +1,4 @@
+use eyre::bail;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -11,13 +12,13 @@ pub struct Map {
 }
 
 impl Map {
-    pub fn new(infile: &str) -> Self {
-        let fh = BufReader::new(File::open(infile).unwrap());
+    pub fn new(infile: &str) -> eyre::Result<Self> {
+        let fh = BufReader::new(File::open(infile)?);
         let mut map = String::new();
         let mut map_w: usize = 0;
         let mut map_h: usize = 0;
         for (h, line) in fh.lines().enumerate() {
-            let line = line.unwrap();
+            let line = line?;
             let line = line.trim();
             let w = line.len();
 
@@ -29,16 +30,14 @@ impl Map {
             map_h = h + 1;
         }
 
-        assert_eq!(
-            map_w * map_h,
-            map.len(),
-            "Map does not have uniform length and width"
-        );
-        Map {
+        if map_w * map_h != map.len() {
+            bail!("Map does not have uniform length and width");
+        }
+        Ok(Map {
             src: map,
             w: map_w,
             h: map_h,
-        }
+        })
     }
 
     #[inline]
