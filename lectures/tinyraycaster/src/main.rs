@@ -1,27 +1,29 @@
-use crate::{image::Image, map::Map};
+use crate::{image::Image, map::Map, player::Player};
 
 mod color;
 mod image;
 mod map;
+mod player;
 
 fn main() {
-    const WIDTH: usize = 512;
-    const HEIGHT: usize = 512;
     const FNAME: &str = "./out.ppm";
 
     // Parse map.
     let map = Map::new("lectures/tinyraycaster/data/map.txt");
     // With initialization function.
-    let mut image = Image::<WIDTH, HEIGHT>::new(|h, w| {
-        let r: u8 = (255 * h / HEIGHT) as u8;
-        // Vary the green channel between 0-255 as w sweeps horizontal.
-        let g: u8 = (255 * w / WIDTH) as u8;
-        let b: u8 = 0;
-        (r, g, b)
-    });
+    let mut image = Image::<512, 512>::new(|_h, _w| (0, 0, 0));
+    let player = Player {
+        x: 3.456,
+        y: 2.345,
+        a: 1.523,
+    };
 
-    // Then add map.
+    // Then add map and player.
     image.draw_map(&map);
+    image.draw_player(&player, &map);
+    // Draw ray for player perspective
+    image.draw_ray(player.x, player.y, player.a, &map);
+
     // Before dumping to outfile.
     image.dump(FNAME).unwrap();
 }

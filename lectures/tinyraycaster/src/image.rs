@@ -1,6 +1,6 @@
 use std::{error::Error, fs::File, io::Write};
 
-use crate::{color::Color, map::Map};
+use crate::{color::Color, map::Map, player::Player};
 
 // Store image in 1D array.
 // Access elems by specify w + (h * WIDTH)
@@ -9,7 +9,7 @@ pub struct Image<const W: usize, const H: usize> {
 }
 
 impl<const W: usize, const H: usize> Image<W, H> {
-    pub fn new(f: impl Fn(usize, usize) -> (u8, u8, u8)) -> Self {
+    pub fn new(mut f: impl FnMut(usize, usize) -> (u8, u8, u8)) -> Self {
         let mut buffer = vec![Color(255); W * H];
         // Iterate through window pixels and fill with color gradient.
         for h in 0..H {
@@ -72,6 +72,64 @@ impl<const W: usize, const H: usize> Image<W, H> {
                 eprintln!("At ({x},{y}) draw {tile:?} tile at ({rect_x}, {rect_y}) ");
                 self.draw_rect(rect_x, rect_y, rect_w, rect_h, color);
             }
+        }
+    }
+
+    pub fn draw_player(&mut self, player: &Player, map: &Map) {
+        let rect_w = W / map.w;
+        let rect_h = H / map.h;
+        // Convert from coordinates to image dim
+        let x = (player.x * rect_w as f32) as usize;
+        let y = (player.y * rect_h as f32) as usize;
+        self.draw_rect(x, y, 5, 5, Color::new(255, 255, 255, None));
+    }
+
+    /// # Drawing a ray.
+    /// Our diagram of the player in space looks like this.
+    /// ```no_run
+    ///  a
+    /// ___
+    /// \p |
+    ///  \ | b
+    /// c \|
+    ///    (x, y)
+    /// ```
+    ///
+    /// Remember soh-cah-toa? This allows us to calculate `x` and `y` from `p_angle` (`ang`).
+    /// * `cos(p_angle) = a/c` which also is `a = c * cos(p_angle)`
+    /// * `sin(p_angle) = b/c` which also is `b = c * cos(p_angle)`
+    ///
+    /// So:
+    /// * `x` and `y` is the endpoint of the ray (hypotenuse of c) along the triangle.
+    /// * `c` is some arbitrary value representing the distance from object hit by ray
+    ///
+    /// Thus:
+    /// * `x = p_x + c * cos(p_angle)`
+    /// * `y = p_y + c * sin(p_angle)`
+    ///
+    /// This function returns the distance (length of c) to the endpoint of the ray.
+    pub fn draw_ray(&mut self, x: f32, y: f32, a: f32, map: &Map) -> f32 {
+        const INC: f32 = 0.05;
+        let mut c: f32 = 0.0;
+        let rect_w = (W / map.w) as f32;
+        let rect_h = (H / map.h) as f32;
+
+        // We don't include a limit (20) unlike the src
+        loop {
+            let cx = x + c * a.cos();
+            let cy = y + c * a.sin();
+
+            // Out of bounds or hit an object
+            if map.tile(cx as usize, cy as usize).is_none_or(|t| t != " ") {
+                return c;
+            };
+
+            // Otherwise, draw ray
+            let px_x = (cx * rect_w) as usize;
+            let px_y = (cy * rect_h) as usize;
+            self.draw_rect(px_x, px_y, 1, 1, Color::new(255, 255, 255, None));
+
+            c += INC
         }
     }
 }
