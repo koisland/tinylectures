@@ -13,12 +13,12 @@ fn main() -> eyre::Result<()> {
     // Parse map.
     let map = Map::new("lectures/tinyraycaster/data/map.txt")?;
     // With initialization function.
-    let mut image = Image::<512, 512>::new(|_h, _w| (0, 0, 0));
+    let mut image = Image::<1024, 512>::new();
     // TODO: Allow setting fov in degrees but internally use radians.
     let player = Player {
         x: 3.456,
         y: 2.345,
-        direction: 1.523,
+        ang: 1.523,
         fov: PI / 3.0,
     };
 

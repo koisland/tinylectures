@@ -10,4 +10,4 @@ cargo run --release
 
 ## TO-DO
 * tinyraycaster
-    * [] Make a small, stealth action game
+    * [ ] Make a small, stealth action game
