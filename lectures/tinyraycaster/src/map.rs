@@ -20,6 +20,12 @@ pub enum Texture {
     Sprite(PathBuf),
 }
 
+#[derive(Debug)]
+pub struct Tile<'src> {
+    pub(crate) icon: char,
+    pub(crate) texture: &'src Texture,
+}
+
 #[derive(Debug, Clone)]
 pub struct Map<S: MapState> {
     pub(crate) src: String,
@@ -105,7 +111,9 @@ impl Map<Uninit> {
                 Texture::Color(Color::new(r?, g?, b?, None))
             } else {
                 let path = std::path::PathBuf::from(src);
-                assert!(path.exists(), "Invalid src ({src}) for tile, {tile}.");
+                if !path.exists() {
+                    bail!("Invalid src ({src}) for tile, {tile}.");
+                }
                 Texture::Sprite(path)
             };
 
@@ -136,31 +144,41 @@ impl Map<Uninit> {
             .collect()
     }
 
-    pub fn finish(self) -> Map<Init> {
-        assert!(!self.src.is_empty(), "Map not initialized.");
+    pub fn finish(self) -> eyre::Result<Map<Init>> {
+        if self.src.is_empty() {
+            bail!("Map not initialized")
+        }
         let tilemap = if self.tilemap.is_empty() {
             self.get_random_tilecolors(None)
         } else {
             self.tilemap
         };
-        Map {
+        Ok(Map {
             src: self.src,
             w: self.w,
             h: self.h,
             tilemap,
             _state: PhantomData,
-        }
+        })
     }
 }
 
 impl Map<Init> {
     #[inline]
-    pub fn tile(&self, x: usize, y: usize) -> Option<&str> {
+    pub fn tile<'src>(&'src self, x: usize, y: usize) -> Option<Tile<'src>> {
         let idx = x + y * self.w;
-        self.src.get(idx..idx + 1)
+        self.src
+            .get(idx..idx + 1)
+            .and_then(|tile| tile.chars().next())
+            .and_then(|tile| {
+                self.tilemap.get(&tile).map(|texture| Tile {
+                    icon: tile,
+                    texture,
+                })
+            })
     }
 
-    pub fn tiles(&self) -> impl Iterator<Item = (usize, usize, Option<&str>)> {
+    pub fn tiles<'src>(&'src self) -> impl Iterator<Item = (usize, usize, Option<Tile<'src>>)> {
         (0..self.h).flat_map(move |y| (0..self.w).map(move |x| (x, y, self.tile(x, y))))
     }
 }

@@ -1,11 +1,11 @@
 use std::f32::consts::PI;
 
-use crate::{image::Image, map::Map, player::Player};
+use crate::{map::Map, player::Player, screen::Screen};
 
 mod color;
-mod image;
 mod map;
 mod player;
+mod screen;
 
 fn main() -> eyre::Result<()> {
     const FNAME: &str = "./out.ppm";
@@ -14,10 +14,10 @@ fn main() -> eyre::Result<()> {
     let map = Map::new()
         .with_map("lectures/tinyraycaster/data/map.txt")?
         .with_textures("lectures/tinyraycaster/data/tilemap.tsv")?
-        .finish();
+        .finish()?;
 
     // With initialization function.
-    let mut image = Image::<1024, 512>::new();
+    let mut screen = Screen::<1024, 512>::new();
     // TODO: Allow setting fov in degrees but internally use radians.
     let player = Player {
         x: 3.456,
@@ -27,11 +27,11 @@ fn main() -> eyre::Result<()> {
     };
 
     // Then add map and player.
-    image.draw_map(&map)?;
-    image.draw_player(&player, &map)?;
+    screen.draw_map(&map)?;
+    screen.draw_player(&player, &map)?;
     // Draw fov for player
-    image.draw_fov(&player, &map)?;
+    screen.draw_fov(&player, &map)?;
 
     // Before dumping to outfile.
-    image.dump(FNAME)
+    screen.dump(FNAME)
 }

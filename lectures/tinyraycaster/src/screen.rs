@@ -1,21 +1,28 @@
-use std::{fs::File, io::Write};
+use std::{fs::File, io::Write, path::PathBuf};
 
 use crate::{
     color::Color,
-    map::{Init, Map},
+    map::{Init, Map, Texture, Tile},
     player::Player,
 };
 
 // Store image in 1D array.
 // Access elems by specify w + (h * WIDTH)
-pub struct Image<const W: usize, const H: usize> {
+pub struct Screen<const W: usize, const H: usize> {
     buffer: Vec<Color>,
 }
 
-impl<const W: usize, const H: usize> Image<W, H> {
+impl<const W: usize, const H: usize> Screen<W, H> {
     pub fn new() -> Self {
         let buffer = vec![Color::new(255, 255, 255, None); W * H];
-        Image::<W, H> { buffer }
+        Screen::<W, H> { buffer }
+    }
+
+    pub fn _draw(outdir: &str, _player: &Player) {
+        let outdir = PathBuf::from(outdir);
+        for i in 0..360 {
+            let _fname = outdir.join(format!("{i}.ppm"));
+        }
     }
 
     /// Write PPM file.
@@ -60,14 +67,20 @@ impl<const W: usize, const H: usize> Image<W, H> {
         let rect_h = H / map.h;
         eprintln!("Rects (w: {rect_w}, h: {rect_h})");
 
-        let color = Color::new(0, 255, 255, None);
         for (x, y, tile) in map.tiles() {
-            if tile.is_some_and(|t| t != " ") {
+            if let Some(tile) = tile.filter(|t| t.icon != ' ') {
                 // Because each rect is w and h
                 let rect_x = x * rect_w;
                 let rect_y = y * rect_h;
                 eprintln!("At ({x},{y}) draw {tile:?} tile at ({rect_x}, {rect_y}) ");
-                self.draw_rect(rect_x, rect_y, rect_w, rect_h, color);
+                let color = match tile.texture {
+                    Texture::Color(color) => color,
+                    Texture::Sprite(_) => {
+                        // TODO: Maybe vary color by texture?
+                        unimplemented!()
+                    }
+                };
+                self.draw_rect(rect_x, rect_y, rect_w, rect_h, *color);
             }
         }
         Ok(())
@@ -108,13 +121,13 @@ impl<const W: usize, const H: usize> Image<W, H> {
     /// * `y = p_y + c * sin(p_angle)`
     ///
     /// This function returns the distance (length of c) to the endpoint of the ray.
-    pub fn draw_ray(
+    pub fn draw_ray<'src>(
         &mut self,
         x: f32,
         y: f32,
         ang: f32,
-        map: &Map<Init>,
-        mut f_hit: impl FnMut(&mut Image<W, H>, f32),
+        map: &'src Map<Init>,
+        mut f_hit: impl FnMut(&mut Screen<W, H>, Tile<'src>, f32),
     ) -> eyre::Result<f32> {
         let rect_w = (W / (map.w * 2)) as f32;
         let rect_h = (H / map.h) as f32;
@@ -132,9 +145,9 @@ impl<const W: usize, const H: usize> Image<W, H> {
             self.draw_rect(px_x, px_y, 1, 1, Color::new(160, 160, 160, None));
 
             // Out of bounds or hit an object
-            if map.tile(cx as usize, cy as usize).is_none_or(|t| t != " ") {
+            if let Some(htile) = map.tile(cx as usize, cy as usize).filter(|t| t.icon != ' ') {
                 // Call function on hit.
-                f_hit(self, c);
+                f_hit(self, htile, c);
                 break;
             };
 
@@ -166,14 +179,22 @@ impl<const W: usize, const H: usize> Image<W, H> {
             // (FOV * 0..512) / 512.
             let pt_2 = player.fov * (i as f32 / fw);
             let angle = pt_1 + pt_2;
-            self.draw_ray(player.x, player.y, angle, map, move |img, c| {
+            self.draw_ray(player.x, player.y, angle, map, move |img, tile, c| {
                 // Closer means smaller c and thus large ht.
                 let col_ht = (H as f32 / c) as usize;
                 // Draw at every angle within FOV
                 let col_x = W / 2 + i;
                 // Start at middle of screen and then drop y by half the col ht. This centers the drawn line.
                 let col_y = H / 2 - col_ht / 2;
-                img.draw_rect(col_x, col_y, 1, col_ht, Color::new(0, 255, 255, None));
+                // Draw texture/tile
+                match tile.texture {
+                    Texture::Color(color) => {
+                        img.draw_rect(col_x, col_y, 1, col_ht, *color);
+                    }
+                    Texture::Sprite(_sprite) => {
+                        unimplemented!()
+                    }
+                };
             })?;
         }
         Ok(())
