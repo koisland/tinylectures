@@ -11,7 +11,11 @@ fn main() -> eyre::Result<()> {
     const FNAME: &str = "./out.ppm";
 
     // Parse map.
-    let map = Map::new("lectures/tinyraycaster/data/map.txt")?;
+    let map = Map::new()
+        .with_map("lectures/tinyraycaster/data/map.txt")?
+        .with_textures("lectures/tinyraycaster/data/tilemap.tsv")?
+        .finish();
+
     // With initialization function.
     let mut image = Image::<1024, 512>::new();
     // TODO: Allow setting fov in degrees but internally use radians.

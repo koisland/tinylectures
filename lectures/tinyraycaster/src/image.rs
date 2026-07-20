@@ -1,6 +1,10 @@
 use std::{fs::File, io::Write};
 
-use crate::{color::Color, map::Map, player::Player};
+use crate::{
+    color::Color,
+    map::{Init, Map},
+    player::Player,
+};
 
 // Store image in 1D array.
 // Access elems by specify w + (h * WIDTH)
@@ -51,7 +55,7 @@ impl<const W: usize, const H: usize> Image<W, H> {
     }
 
     // TODO: Maybe move to Map.
-    pub fn draw_map(&mut self, map: &Map) -> eyre::Result<()> {
+    pub fn draw_map(&mut self, map: &Map<Init>) -> eyre::Result<()> {
         let rect_w = W / (map.w * 2);
         let rect_h = H / map.h;
         eprintln!("Rects (w: {rect_w}, h: {rect_h})");
@@ -70,7 +74,7 @@ impl<const W: usize, const H: usize> Image<W, H> {
     }
 
     // TODO: Refactor draw_* to take a struct that implents and Entity trait
-    pub fn draw_player(&mut self, player: &Player, map: &Map) -> eyre::Result<()> {
+    pub fn draw_player(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
         let rect_w = W / (map.w * 2);
         let rect_h = H / map.h;
         // Convert from coordinates to image dim
@@ -109,7 +113,7 @@ impl<const W: usize, const H: usize> Image<W, H> {
         x: f32,
         y: f32,
         ang: f32,
-        map: &Map,
+        map: &Map<Init>,
         mut f_hit: impl FnMut(&mut Image<W, H>, f32),
     ) -> eyre::Result<f32> {
         let rect_w = (W / (map.w * 2)) as f32;
@@ -152,7 +156,7 @@ impl<const W: usize, const H: usize> Image<W, H> {
     /// * Add both together to calculate the fov
     ///
     /// We iterate over the width because it is the hypotenuse of the FOV tri/cone.
-    pub fn draw_fov(&mut self, player: &Player, map: &Map) -> eyre::Result<()> {
+    pub fn draw_fov(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
         let fw: f32 = (W / 2) as f32;
         // Angle between x-axis and fov
         // Direction - (FOV / 2)
