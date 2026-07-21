@@ -154,8 +154,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         Ok(c)
     }
 
-    /// Generate the field-of-view of the player
-    ///
+    /// # Generate the field-of-view of the player
     /// ```no_run
     ///    ------
     ///   /2\2 \1
@@ -167,6 +166,13 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     /// * Add both together to calculate the fov
     ///
     /// We iterate over the width because it is the hypotenuse of the FOV tri/cone.
+    ///
+    /// # To adjust for fisheye distortion:
+    /// * Because the height of the walls are determined based on distance, distant rays in the fov are longer and create shorter walls.
+    /// * We need to take the range instead of the distance to determine wall height.
+    ///
+    /// See https://gamedev.stackexchange.com/a/97580 for diagram.
+    ///
     pub fn draw_fov(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
         let fw: f32 = (W / 2) as f32;
         // Angle between x-axis and fov
@@ -179,7 +185,10 @@ impl<const W: usize, const H: usize> Screen<W, H> {
             let angle = pt_1 + pt_2;
             self.draw_ray(player.x, player.y, angle, map, move |img, tile, c| {
                 // Closer means smaller c and thus large ht.
-                let col_ht = (H as f32 / c) as usize;
+                // We need to adjust this scaling to avoid fisheye distortion due to the ray hitting at multiple angles
+                // See https://gamedev.stackexchange.com/a/97580
+                // And https://lodev.org/cgtutor/raycasting.html
+                let col_ht = (H as f32 / (c * (angle - player.ang).cos())) as usize;
                 // Draw at every angle within FOV
                 let col_x = W / 2 + i;
                 // Start at middle of screen and then drop y by half the col ht. This centers the drawn line.
