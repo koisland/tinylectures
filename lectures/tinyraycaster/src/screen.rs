@@ -1,4 +1,8 @@
-use std::{fs::File, io::Write, path::Path};
+use std::{
+    fs::File,
+    io::{BufWriter, Write},
+    path::Path,
+};
 
 use crate::{
     color::Color,
@@ -26,19 +30,16 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     /// https://netpbm.sourceforge.net/doc/ppm.html
     pub fn dump(&self, fname: impl AsRef<Path>) -> eyre::Result<()> {
         // Check images is correct size as given width and height.
-        let mut fh = File::create(fname)?;
+        let mut fh = BufWriter::new(File::create(fname)?);
         // Write magic number identifying file type, w, h, max color value. All delimited by newline.
-        let ppm_mdata = format!("P3\n{W} {H}\n255\n").into_bytes();
-        fh.write_all(&ppm_mdata)?;
-        const END_CHAR: [&str; 2] = ["\n", " "];
+        write!(fh, "P3\n{W} {H}\n255\n")?;
 
+        const END_CHAR: [&str; 2] = ["\n", " "];
         for (i, px) in self.buffer.iter().take(H * W).enumerate() {
             let (r, g, b, _) = px.channels();
             // Place end char so after each rgb triplet, properly spaced.
             let end_char = END_CHAR[usize::from(i % W != 0)];
-            let px_rgb = format!("{r} {g} {b}{end_char}").into_bytes();
-
-            fh.write_all(&px_rgb)?;
+            write!(fh, "{r} {g} {b}{end_char}")?;
         }
         Ok(())
     }
