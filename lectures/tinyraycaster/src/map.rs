@@ -164,7 +164,6 @@ impl Map<Uninit> {
 }
 
 impl Map<Init> {
-    #[inline]
     pub fn tile<'src>(&'src self, x: usize, y: usize) -> Option<Tile<'src>> {
         let idx = x + y * self.w;
         self.src

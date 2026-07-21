@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, path::PathBuf};
+use std::{fs::File, io::Write, path::Path};
 
 use crate::{
     color::Color,
@@ -18,16 +18,13 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         Screen::<W, H> { buffer }
     }
 
-    pub fn _draw(outdir: &str, _player: &Player) {
-        let outdir = PathBuf::from(outdir);
-        for i in 0..360 {
-            let _fname = outdir.join(format!("{i}.ppm"));
-        }
+    pub fn clear(&mut self) {
+        self.buffer = vec![Color::new(255, 255, 255, None); W * H];
     }
 
     /// Write PPM file.
     /// https://netpbm.sourceforge.net/doc/ppm.html
-    pub fn dump(&self, fname: &str) -> eyre::Result<()> {
+    pub fn dump(&self, fname: impl AsRef<Path>) -> eyre::Result<()> {
         // Check images is correct size as given width and height.
         let mut fh = File::create(fname)?;
         // Write magic number identifying file type, w, h, max color value. All delimited by newline.
@@ -65,14 +62,14 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     pub fn draw_map(&mut self, map: &Map<Init>) -> eyre::Result<()> {
         let rect_w = W / (map.w * 2);
         let rect_h = H / map.h;
-        eprintln!("Rects (w: {rect_w}, h: {rect_h})");
+        // eprintln!("Rects (w: {rect_w}, h: {rect_h})");
 
         for (x, y, tile) in map.tiles() {
             if let Some(tile) = tile.filter(|t| t.icon != ' ') {
                 // Because each rect is w and h
                 let rect_x = x * rect_w;
                 let rect_y = y * rect_h;
-                eprintln!("At ({x},{y}) draw {tile:?} tile at ({rect_x}, {rect_y}) ");
+                // eprintln!("At ({x},{y}) draw {tile:?} tile at ({rect_x}, {rect_y}) ");
                 let color = match tile.texture {
                     Texture::Color(color) => color,
                     Texture::Sprite(_) => {
@@ -133,7 +130,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         let rect_h = (H / map.h) as f32;
 
         // We don't include a limit (20) unlike the src
-        const INC: f32 = 0.05;
+        const INC: f32 = 0.01;
         let mut c: f32 = 0.0;
         loop {
             let cx = x + c * ang.cos();
