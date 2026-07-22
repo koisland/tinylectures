@@ -1,4 +1,5 @@
 use eyre::{bail, ContextCompat};
+use image::{DynamicImage, GenericImageView};
 use itertools::Itertools;
 use rand::prelude::*;
 
@@ -7,17 +8,16 @@ use std::{
     fs::File,
     io::{BufRead, BufReader},
     marker::PhantomData,
-    path::PathBuf,
 };
 
 use crate::color::Color;
 
 #[derive(Debug, Clone)]
 pub enum Texture {
-    #[allow(dead_code)]
+    /// Single color
     Color(Color),
-    #[allow(dead_code)]
-    Sprite(PathBuf),
+    /// Sprite
+    Sprite(DynamicImage),
 }
 
 #[derive(Debug)]
@@ -27,11 +27,26 @@ pub struct Tile<'src> {
 }
 
 #[derive(Debug, Clone)]
+pub struct Textures {
+    // Size of texture square length and width.
+    size: usize,
+    // Textures mapped to map character
+    tilemap: HashMap<char, Texture>,
+}
+
+impl Textures {
+    fn clear(&mut self) {
+        self.size = 0;
+        self.tilemap.clear();
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Map<S: MapState> {
     pub(crate) src: String,
     pub(crate) w: usize,
     pub(crate) h: usize,
-    pub(crate) tilemap: HashMap<char, Texture>,
+    pub(crate) textures: Textures,
     _state: PhantomData<S>,
 }
 
@@ -54,7 +69,10 @@ impl Map<Uninit> {
             src: String::new(),
             w: 0,
             h: 0,
-            tilemap: HashMap::new(),
+            textures: Textures {
+                size: 0,
+                tilemap: HashMap::new(),
+            },
             _state: PhantomData,
         }
     }
@@ -86,14 +104,20 @@ impl Map<Uninit> {
         Ok(self)
     }
 
-    pub fn with_textures(mut self, infile: &str) -> eyre::Result<Self> {
+    pub fn with_textures(mut self, infile: &str, size: usize) -> eyre::Result<Self> {
         let fh = BufReader::new(File::open(infile)?);
-        self.tilemap.clear();
+        self.textures.clear();
+
+        let mut texture_cache = HashMap::new();
 
         for line in fh.lines() {
             let line = line?;
+            // Skip comments or header
+            if line.starts_with('#') {
+                continue;
+            }
 
-            let Some((tile, src)) = line.trim().split('\t').collect_tuple() else {
+            let Some((tile, src, idx)) = line.trim().split('\t').collect_tuple() else {
                 bail!("Invalid line format for {line}. Expects two columns, tilechar and path/rgb")
             };
             let tile = tile
@@ -101,7 +125,7 @@ impl Map<Uninit> {
                 .next()
                 .with_context(|| format!("No character in line, {line}"))?;
 
-            // Check if path or texture
+            // Check if RGB color or image texture
             let texture = if src.contains(',') {
                 let (r, g, b) = src
                     .split(',')
@@ -114,50 +138,75 @@ impl Map<Uninit> {
                 if !path.exists() {
                     bail!("Invalid src ({src}) for tile, {tile}.");
                 }
-                Texture::Sprite(path)
+
+                let img = if let Some(img) = texture_cache.get(src) {
+                    img
+                } else {
+                    texture_cache.insert(src.to_owned(), image::open(src)?);
+                    // Already inserted.
+                    texture_cache.get(src).unwrap()
+                };
+
+                let (w, _) = img.dimensions();
+                let w = w as usize;
+                let idx: usize = idx.parse()?;
+
+                // Assuming square.
+                let ncols = w / size;
+                // Convert idx to pixel coordinates
+                let div = idx / ncols;
+                let rem = idx % ncols;
+                let x = (rem * size) as u32;
+                let y = (div * size) as u32;
+                // Then slice image out of sprite sheet
+                let img_slice = img.view(x, y, size as u32, size as u32).to_image();
+                Texture::Sprite(DynamicImage::ImageRgba8(img_slice))
             };
 
-            if let Some(tile_src) = self.tilemap.get_mut(&tile) {
+            if let Some(tile_src) = self.textures.tilemap.get_mut(&tile) {
                 *tile_src = texture
             } else {
-                self.tilemap.insert(tile.to_owned(), texture);
+                self.textures.tilemap.insert(tile.to_owned(), texture);
             }
         }
 
         Ok(self)
     }
 
-    fn get_random_tilecolors(&self, seed: Option<u64>) -> HashMap<char, Texture> {
+    fn get_random_tilecolors(&self, seed: Option<u64>) -> Textures {
         let mut rng = seed
             .map(StdRng::seed_from_u64)
             .unwrap_or_else(|| rand::make_rng());
-
-        self.src
-            .chars()
-            .unique()
-            .map(|v| {
-                let r: u8 = rng.random();
-                let g: u8 = rng.random();
-                let b: u8 = rng.random();
-                (v, Texture::Color(Color::new(r, g, b, None)))
-            })
-            .collect()
+        Textures {
+            size: 0,
+            tilemap: self
+                .src
+                .chars()
+                .unique()
+                .map(|v| {
+                    let r: u8 = rng.random();
+                    let g: u8 = rng.random();
+                    let b: u8 = rng.random();
+                    (v, Texture::Color(Color::new(r, g, b, None)))
+                })
+                .collect(),
+        }
     }
 
     pub fn finish(self) -> eyre::Result<Map<Init>> {
         if self.src.is_empty() {
             bail!("Map not initialized")
         }
-        let tilemap = if self.tilemap.is_empty() {
+        let textures = if self.textures.tilemap.is_empty() {
             self.get_random_tilecolors(None)
         } else {
-            self.tilemap
+            self.textures
         };
         Ok(Map {
             src: self.src,
             w: self.w,
             h: self.h,
-            tilemap,
+            textures,
             _state: PhantomData,
         })
     }
@@ -170,7 +219,7 @@ impl Map<Init> {
             .get(idx..idx + 1)
             .and_then(|tile| tile.chars().next())
             .and_then(|tile| {
-                self.tilemap.get(&tile).map(|texture| Tile {
+                self.textures.tilemap.get(&tile).map(|texture| Tile {
                     icon: tile,
                     texture,
                 })

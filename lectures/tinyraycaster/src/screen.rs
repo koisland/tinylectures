@@ -4,11 +4,22 @@ use std::{
     path::Path,
 };
 
+use image::{DynamicImage, GenericImageView};
+
 use crate::{
     color::Color,
     map::{Init, Map, Texture, Tile},
     player::Player,
 };
+
+pub struct RayHit {
+    // x coord hit by ray
+    cx: f32,
+    // y coord hit by ray
+    cy: f32,
+    // Distance from player to hit tile
+    dst: f32,
+}
 
 // Store image in 1D array.
 // Access elems by specify w + (h * WIDTH)
@@ -59,6 +70,22 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         }
     }
 
+    pub fn draw_image(&mut self, x: usize, y: usize, image: &DynamicImage) {
+        let (w, h) = image.dimensions();
+        let (w, h) = (w as usize, h as usize);
+        for i in 0..w {
+            for j in 0..h {
+                let cx = x + i;
+                let cy = y + j;
+                if cx >= W || cy >= H {
+                    continue;
+                }
+                let [r, g, b, a] = image.get_pixel(i as u32, j as u32).0;
+                self.buffer[cx + cy * W] = Color::new(r, g, b, Some(a));
+            }
+        }
+    }
+
     // TODO: Maybe move to Map.
     pub fn draw_map(&mut self, map: &Map<Init>) -> eyre::Result<()> {
         let rect_w = W / (map.w * 2);
@@ -71,15 +98,18 @@ impl<const W: usize, const H: usize> Screen<W, H> {
                 let rect_x = x * rect_w;
                 let rect_y = y * rect_h;
                 // eprintln!("At ({x},{y}) draw {tile:?} tile at ({rect_x}, {rect_y}) ");
-                let color = match tile.texture {
-                    Texture::Color(color) => color,
-                    Texture::Sprite(_) => {
-                        // TODO: Maybe vary color by texture?
-                        unimplemented!()
+                match tile.texture {
+                    Texture::Color(color) => {
+                        self.draw_rect(rect_x, rect_y, rect_w, rect_h, *color);
+                    }
+                    Texture::Sprite(img) => {
+                        // Draw thumbnail
+                        let img_thumbnail = img.thumbnail(rect_w as u32, rect_h as u32);
+                        self.draw_image(rect_x, rect_y, &img_thumbnail);
                     }
                 };
-                self.draw_rect(rect_x, rect_y, rect_w, rect_h, *color);
             }
+            continue;
         }
         Ok(())
     }
@@ -125,33 +155,39 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         y: f32,
         ang: f32,
         map: &'src Map<Init>,
-        mut f_hit: impl FnMut(&mut Screen<W, H>, Tile<'src>, f32),
+        mut f_hit: impl FnMut(&mut Screen<W, H>, Tile<'src>, RayHit),
     ) -> eyre::Result<f32> {
         let rect_w = (W / (map.w * 2)) as f32;
         let rect_h = (H / map.h) as f32;
 
         // We don't include a limit (20) unlike the src
         const INC: f32 = 0.01;
-        let mut c: f32 = 0.0;
+        let mut dst: f32 = 0.0;
         loop {
-            let cx = x + c * ang.cos();
-            let cy = y + c * ang.sin();
+            let cx = x + dst * ang.cos();
+            let cy = y + dst * ang.sin();
 
             // Otherwise, draw ray
-            let px_x = (cx * rect_w) as usize;
-            let px_y = (cy * rect_h) as usize;
-            self.draw_rect(px_x, px_y, 1, 1, Color::new(160, 160, 160, None));
+            let px_x = cx * rect_w;
+            let px_y = cy * rect_h;
+            self.draw_rect(
+                px_x as usize,
+                px_y as usize,
+                1,
+                1,
+                Color::new(160, 160, 160, None),
+            );
 
             // Out of bounds or hit an object
             if let Some(htile) = map.tile(cx as usize, cy as usize).filter(|t| t.icon != ' ') {
                 // Call function on hit.
-                f_hit(self, htile, c);
+                f_hit(self, htile, RayHit { cx, cy, dst });
                 break;
             };
 
-            c += INC
+            dst += INC
         }
-        Ok(c)
+        Ok(dst)
     }
 
     /// # Generate the field-of-view of the player
@@ -168,11 +204,16 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     /// We iterate over the width because it is the hypotenuse of the FOV tri/cone.
     ///
     /// # To adjust for fisheye distortion:
+    /// See https://gamedev.stackexchange.com/a/97580 for diagram.
     /// * Because the height of the walls are determined based on distance, distant rays in the fov are longer and create shorter walls.
     /// * We need to take the range instead of the distance to determine wall height.
     ///
-    /// See https://gamedev.stackexchange.com/a/97580 for diagram.
-    ///
+    /// # Drawing textures
+    /// In order to draw the texture, we have to know where on the tile was hit.
+    /// * It could be on the horizontal (hitx) or vertical (hity)
+    /// * They contain (signed) fractional parts of cx and cy (endpoint coordinates of the ray) from 0.5 to -0.5
+    /// * The large magnitude indicates that it is the one hit. We can get the coordinate in sprite space as a result.
+    /// * Then we draw it.
     pub fn draw_fov(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
         let fw: f32 = (W / 2) as f32;
         // Angle between x-axis and fov
@@ -183,27 +224,78 @@ impl<const W: usize, const H: usize> Screen<W, H> {
             // (FOV * 0..512) / 512.
             let pt_2 = player.fov * (i as f32 / fw);
             let angle = pt_1 + pt_2;
-            self.draw_ray(player.x, player.y, angle, map, move |img, tile, c| {
+            self.draw_ray(player.x, player.y, angle, map, move |img, tile, ray_hit| {
                 // Closer means smaller c and thus large ht.
                 // We need to adjust this scaling to avoid fisheye distortion due to the ray hitting at multiple angles
                 // See https://gamedev.stackexchange.com/a/97580
                 // And https://lodev.org/cgtutor/raycasting.html
-                let col_ht = (H as f32 / (c * (angle - player.ang).cos())) as usize;
+                let col_ht = (H as f32 / (ray_hit.dst * (angle - player.ang).cos())) as usize;
                 // Draw at every angle within FOV
                 let col_x = W / 2 + i;
-                // Start at middle of screen and then drop y by half the col ht. This centers the drawn line.
-                let col_y = H / 2 - col_ht / 2;
+
                 // Draw texture/tile
                 match tile.texture {
                     Texture::Color(color) => {
+                        // Start at middle of screen and then drop y by half the col ht. This centers the drawn line.
+                        let col_y = H / 2 - col_ht / 2;
                         img.draw_rect(col_x, col_y, 1, col_ht, *color);
                     }
-                    Texture::Sprite(_sprite) => {
-                        unimplemented!()
+                    Texture::Sprite(sprite) => {
+                        let size = sprite.height() as f32;
+                        // We need to know whether we hit the x or y side of the texture.
+                        // hitx and hity contain (signed) fractional parts of cx and cy from 0.5 to -0.5
+                        // If hity (fractional part of y) magnitude larger, then "vertical" part of tile hit.
+                        //  hitx             hity
+                        //  *
+                        // ______              ______
+                        // |    |            * |    |
+                        // |____|              |____|
+                        let hitx = ray_hit.cx - (ray_hit.cx + 0.5).floor();
+                        let hity = ray_hit.cy - (ray_hit.cy + 0.5).floor();
+                        // Once know part of texture was hit, we can get what part of sprite to render from the size and fraction.
+                        let mut x_texcoord = if hity.abs() > hitx.abs() {
+                            hity * size
+                        } else {
+                            hitx * size
+                        };
+                        if x_texcoord < 0.0 {
+                            x_texcoord += size
+                        }
+                        assert!(x_texcoord >= 0.0 && x_texcoord < size);
+
+                        // Scale column to height.
+                        let mut texcol = vec![];
+                        for y in 0..col_ht {
+                            let pix_y = (y as f32 * size) / col_ht as f32;
+                            // eprintln!("{y}*{size}/{col_ht}={pix_y}");
+                            texcol.push(sprite.get_pixel(x_texcoord as u32, pix_y as u32));
+                        }
+                        // Write scaled column
+                        for (j, [r, g, b, a]) in
+                            texcol.iter().map(|px| px.0).enumerate().take(col_ht)
+                        {
+                            // Start at middle of screen ht, then half of the column ht. Add pixels to reach col_ht again.
+                            let pix_y = j + (H / 2) - (col_ht / 2);
+                            if pix_y >= H {
+                                continue;
+                            }
+                            img.buffer[col_x + pix_y * W] = Color::new(r, g, b, Some(a))
+                        }
                     }
                 };
             })?;
         }
+        Ok(())
+    }
+
+    pub fn render(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
+        // Clear buffer
+        self.clear();
+        // Then draw map and player again.
+        // Draw fov for player
+        self.draw_map(map)?;
+        self.draw_player(player, map)?;
+        self.draw_fov(player, map)?;
         Ok(())
     }
 }

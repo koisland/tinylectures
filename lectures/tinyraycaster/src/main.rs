@@ -11,7 +11,7 @@ fn main() -> eyre::Result<()> {
     // Parse map.
     let map = Map::new()
         .with_map("lectures/tinyraycaster/data/map.txt")?
-        .with_textures("lectures/tinyraycaster/data/tilemap.tsv")?
+        .with_textures("lectures/tinyraycaster/data/tilemap_textures.tsv", 64)?
         .finish()?;
 
     // With initialization function.
@@ -27,14 +27,10 @@ fn main() -> eyre::Result<()> {
     let outdir = PathBuf::from(".");
     for i in 0..360 {
         let fname = outdir.join(format!("{i}.ppm"));
+        // Rotate
         player.ang += 2.0 * PI / 360.0;
-
-        screen.clear();
-        // Then draw map and player again.
-        // Draw fov for player
-        screen.draw_map(&map)?;
-        screen.draw_player(&player, &map)?;
-        screen.draw_fov(&player, &map)?;
+        // Render frame
+        screen.render(&player, &map)?;
         // Before dumping to outfile.
         screen.dump(fname)?;
     }
