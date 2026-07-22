@@ -5,7 +5,7 @@ Based on:
 
 ## Usage
 ```bash
-cargo run --release
+make run
 ```
 
 ## TO-DO
