@@ -1,3 +1,5 @@
+// use crate::entity::Entity;
+
 /// Player
 pub struct Player {
     /// Player x coordinate
@@ -10,3 +12,13 @@ pub struct Player {
     /// Player fov in radians where midpoint is self.direction
     pub fov: f32,
 }
+
+// impl Entity for Player {
+//     fn x(&self) -> f32 {
+//         self.x
+//     }
+
+//     fn y(&self) -> f32 {
+//         self.y
+//     }
+// }

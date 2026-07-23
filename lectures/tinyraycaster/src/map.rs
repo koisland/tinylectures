@@ -4,13 +4,13 @@ use itertools::Itertools;
 use rand::prelude::*;
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs::File,
     io::{BufRead, BufReader},
     marker::PhantomData,
 };
 
-use crate::color::Color;
+use crate::{color::Color, entity::Entity};
 
 #[derive(Debug, Clone)]
 pub enum Texture {
@@ -41,11 +41,11 @@ impl Textures {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct Map<S: MapState> {
     pub(crate) src: String,
     pub(crate) w: usize,
     pub(crate) h: usize,
+    pub(crate) entities: BTreeMap<usize, Box<dyn Entity>>,
     pub(crate) textures: Textures,
     _state: PhantomData<S>,
 }
@@ -73,6 +73,7 @@ impl Map<Uninit> {
                 size: 0,
                 tilemap: HashMap::new(),
             },
+            entities: BTreeMap::default(),
             _state: PhantomData,
         }
     }
@@ -207,6 +208,7 @@ impl Map<Uninit> {
             w: self.w,
             h: self.h,
             textures,
+            entities: BTreeMap::new(),
             _state: PhantomData,
         })
     }
@@ -229,4 +231,13 @@ impl Map<Init> {
     pub fn tiles<'src>(&'src self) -> impl Iterator<Item = (usize, usize, Option<Tile<'src>>)> {
         (0..self.h).flat_map(move |y| (0..self.w).map(move |x| (x, y, self.tile(x, y))))
     }
+
+    pub fn spawn_entity(&mut self, entity: impl Entity + 'static) {
+        let eid = self.entities.len();
+        self.entities.insert(eid, Box::new(entity));
+    }
+
+    // pub fn get_entity_by_id(&mut self, id: usize) -> Option<&mut Box<dyn Entity + 'static>> {
+    //     self.entities.get_mut(&id)
+    // }
 }

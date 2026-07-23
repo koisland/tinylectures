@@ -87,7 +87,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     }
 
     // TODO: Maybe move to Map.
-    pub fn draw_map(&mut self, map: &Map<Init>) -> eyre::Result<()> {
+    pub fn draw_map(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
         let rect_w = W / (map.w * 2);
         let rect_h = H / map.h;
         // eprintln!("Rects (w: {rect_w}, h: {rect_h})");
@@ -111,18 +111,30 @@ impl<const W: usize, const H: usize> Screen<W, H> {
             }
             continue;
         }
+        self.draw_player_on_map(player, map);
+        self.draw_entities_on_map(map);
         Ok(())
     }
 
     // TODO: Refactor draw_* to take a struct that implents and Entity trait
-    pub fn draw_player(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
+    pub fn draw_player_on_map(&mut self, player: &Player, map: &Map<Init>) {
         let rect_w = W / (map.w * 2);
         let rect_h = H / map.h;
         // Convert from coordinates to image dim
         let x = (player.x * rect_w as f32) as usize;
         let y = (player.y * rect_h as f32) as usize;
-        self.draw_rect(x, y, 5, 5, Color::new(255, 255, 255, None));
-        Ok(())
+        self.draw_rect(x, y, 5, 5, Color::new(0, 0, 0, None));
+    }
+
+    pub fn draw_entities_on_map(&mut self, map: &Map<Init>) {
+        let rect_w = W / (map.w * 2);
+        let rect_h = H / map.h;
+
+        for entity in map.entities.values() {
+            let x = (entity.x() * rect_w as f32) as usize;
+            let y = (entity.y() * rect_h as f32) as usize;
+            self.draw_rect(x, y, 5, 5, Color::new(255, 0, 0, None));
+        }
     }
 
     /// # Drawing a ray.
@@ -291,11 +303,10 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     pub fn render(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
         // Clear buffer
         self.clear();
-        // Then draw map and player again.
         // Draw fov for player
-        self.draw_map(map)?;
-        self.draw_player(player, map)?;
         self.draw_fov(player, map)?;
+        // Then draw map and player.
+        self.draw_map(player, map)?;
         Ok(())
     }
 }
