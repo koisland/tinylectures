@@ -1,0 +1,11 @@
+#type	lbl	state	src	src_idx
+tile	rock	base	lectures/tinyraycaster/data/walltext.png	0
+tile	gray_brick	base	lectures/tinyraycaster/data/walltext.png	1
+tile	red_brick	base	lectures/tinyraycaster/data/walltext.png	2
+tile	door	base	lectures/tinyraycaster/data/walltext.png	3
+tile	green_rock	base	lectures/tinyraycaster/data/walltext.png	4
+tile	green_hex	base	lectures/tinyraycaster/data/walltext.png	5
+enemy	red_blob	base	lectures/tinyraycaster/data/monsters.png	0
+enemy	red_blob	injured	lectures/tinyraycaster/data/monsters.png	1
+enemy	demon	base	lectures/tinyraycaster/data/monsters.png	2
+enemy	demon	enraged	lectures/tinyraycaster/data/monsters.png	3

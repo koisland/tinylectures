@@ -1,0 +1,4 @@
+#id	type	lbl	state	x	y	angle
+a	enemy	red_blob	base	1.834	8.765
+a	enemy	red_blob	injured	5.323	5.365
+a	enemy	red_blob	injured	4.123	10.265

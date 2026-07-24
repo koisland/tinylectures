@@ -8,8 +8,8 @@ use image::{DynamicImage, GenericImageView};
 
 use crate::{
     color::Color,
-    entity::Entity,
-    map::{Init, Map, Texture, Tile},
+    enemy::Enemy,
+    map::{Init, Map, Texture},
     player::Player,
 };
 
@@ -98,12 +98,14 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         // eprintln!("Rects (w: {rect_w}, h: {rect_h})");
 
         for (x, y, tile) in map.tiles() {
-            if let Some(tile) = tile.filter(|t| t.icon != ' ') {
+            if let Some(tile) = tile {
                 // Because each rect is w and h
                 let rect_x = x * rect_w;
                 let rect_y = y * rect_h;
+                let texture = &map.textures.tiles[&tile.typ][&tile.state];
+
                 // eprintln!("At ({x},{y}) draw {tile:?} tile at ({rect_x}, {rect_y}) ");
-                match tile.texture {
+                match texture {
                     Texture::Color(color) => {
                         self.draw_rect(rect_x, rect_y, rect_w, rect_h, *color);
                     }
@@ -135,16 +137,16 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         let rect_w = W / (map.w * 2);
         let rect_h = H / map.h;
 
-        for entity in map.entities.values() {
-            let x = (entity.x() * rect_w as f32) as usize;
-            let y = (entity.y() * rect_h as f32) as usize;
+        for entity in map.id_enemy_map.values() {
+            let x = (entity.x * rect_w as f32) as usize;
+            let y = (entity.y * rect_h as f32) as usize;
             self.draw_rect(x, y, 5, 5, Color::new(255, 0, 0, None));
         }
     }
 
-    pub fn draw_sprite(&mut self, entity: &(impl Entity + ?Sized), player: &Player) {
+    pub fn draw_sprite(&mut self, enemy: &Enemy, player: &Player) {
         // pythagorean theorem
-        let sprite_dst = ((player.x - entity.x()).powi(2) + (player.y - entity.y()).powi(2)).sqrt();
+        let sprite_dst = ((player.x - enemy.x).powi(2) + (player.y - enemy.y).powi(2)).sqrt();
 
         // Scale sprite by distance from player and clamp to 2000 if very close.
         let sprite_screen_size = (H as f32 / sprite_dst).min(2000.) as usize;
@@ -154,7 +156,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
 
         // Get the upper left corner of the sprite
         // TODO: Huh? Unclear why this works.
-        let h_offset_pt1 = (entity.angle() - player.ang) * hscreen_width as f32 / player.fov;
+        let h_offset_pt1 = (enemy.angle - player.ang) * hscreen_width as f32 / player.fov;
         let h_offset_pt2 = (hscreen_width - hsprite_screen_size) as f32;
         let h_offset = (h_offset_pt1 + h_offset_pt2) as usize;
         let v_offset = hscreen_height - hsprite_screen_size;
@@ -176,8 +178,8 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     }
 
     pub fn draw_sprites(&mut self, map: &Map<Init>, player: &Player) {
-        for entity in map.entities.values() {
-            self.draw_sprite(entity.as_ref(), player);
+        for entity in map.id_enemy_map.values() {
+            self.draw_sprite(entity, player);
         }
     }
 
@@ -205,13 +207,13 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     /// * `y = p_y + c * sin(p_angle)`
     ///
     /// This function returns the distance (length of c) to the endpoint of the ray.
-    pub fn draw_ray<'src>(
+    pub fn draw_ray(
         &mut self,
         x: f32,
         y: f32,
         ang: f32,
-        map: &'src Map<Init>,
-        mut f_hit: impl FnMut(&mut Screen<W, H>, Tile<'src>, RayHit),
+        map: &Map<Init>,
+        mut f_hit: impl FnMut(&mut Screen<W, H>, &Texture, RayHit),
     ) -> eyre::Result<f32> {
         let rect_w = (W / (map.w * 2)) as f32;
         let rect_h = (H / map.h) as f32;
@@ -235,9 +237,11 @@ impl<const W: usize, const H: usize> Screen<W, H> {
             );
 
             // Out of bounds or hit an object
-            if let Some(htile) = map.tile(cx as usize, cy as usize).filter(|t| t.icon != ' ') {
+            if let Some(htile) = map.tile(cx as usize, cy as usize) {
                 // Call function on hit.
-                f_hit(self, htile, RayHit { cx, cy, dst });
+                // TODO: Abstract to function to handle cases where no key
+                let texture = &map.textures.tiles[&htile.typ][&htile.state];
+                f_hit(self, texture, RayHit { cx, cy, dst });
                 break;
             };
 
@@ -290,7 +294,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
                 let col_x = W / 2 + i;
 
                 // Draw texture/tile
-                match tile.texture {
+                match tile {
                     Texture::Color(color) => {
                         // Start at middle of screen and then drop y by half the col ht. This centers the drawn line.
                         let col_y = H / 2 - col_ht / 2;

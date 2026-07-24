@@ -1,16 +1,20 @@
 use eyre::{bail, ContextCompat};
 use image::{DynamicImage, GenericImageView};
 use itertools::Itertools;
-use rand::prelude::*;
 
 use std::{
     collections::{BTreeMap, HashMap},
     fs::File,
     io::{BufRead, BufReader},
     marker::PhantomData,
+    str::FromStr,
 };
 
-use crate::{color::Color, entity::Entity};
+use crate::{
+    color::Color,
+    enemy::{Enemy, EnemyState, EnemyType},
+    tiles::{Tile, TileState, TileType},
+};
 
 #[derive(Debug, Clone)]
 pub enum Texture {
@@ -20,33 +24,35 @@ pub enum Texture {
     Sprite(DynamicImage),
 }
 
-#[derive(Debug)]
-pub struct Tile<'src> {
-    pub(crate) icon: char,
-    pub(crate) texture: &'src Texture,
-}
-
 #[derive(Debug, Clone)]
 pub struct Textures {
     // Size of texture square length and width.
-    size: usize,
-    // Textures mapped to map character
-    tilemap: HashMap<char, Texture>,
+    pub size: usize,
+    // Textures mapped to map tiles and state
+    pub tiles: HashMap<TileType, HashMap<TileState, Texture>>,
+    // Textures mapped to map entities and state
+    pub entities: HashMap<EnemyType, HashMap<EnemyState, Texture>>,
 }
 
 impl Textures {
     fn clear(&mut self) {
         self.size = 0;
-        self.tilemap.clear();
+        self.tiles.clear();
+        self.entities.clear();
     }
 }
 
 pub struct Map<S: MapState> {
-    pub(crate) src: String,
-    pub(crate) w: usize,
-    pub(crate) h: usize,
-    pub(crate) entities: BTreeMap<usize, Box<dyn Entity>>,
-    pub(crate) textures: Textures,
+    pub src: String,
+    pub w: usize,
+    pub h: usize,
+    // tile position to id
+    pub tile_pos_id_map: HashMap<(usize, usize), usize>,
+    pub id_tile_map: BTreeMap<usize, Tile>,
+    // enemy position to id
+    pub enemy_pos_id_map: HashMap<(usize, usize), usize>,
+    pub id_enemy_map: BTreeMap<usize, Enemy>,
+    pub textures: Textures,
     _state: PhantomData<S>,
 }
 
@@ -71,9 +77,13 @@ impl Map<Uninit> {
             h: 0,
             textures: Textures {
                 size: 0,
-                tilemap: HashMap::new(),
+                tiles: HashMap::new(),
+                entities: HashMap::new(),
             },
-            entities: BTreeMap::default(),
+            enemy_pos_id_map: HashMap::default(),
+            id_enemy_map: BTreeMap::default(),
+            tile_pos_id_map: HashMap::default(),
+            id_tile_map: BTreeMap::default(),
             _state: PhantomData,
         }
     }
@@ -88,6 +98,21 @@ impl Map<Uninit> {
             let line = line?;
             let line = line.trim();
             let w = line.len();
+
+            // Add tiles as entities
+            for (x, tile) in line.chars().enumerate() {
+                let Ok(tile_typ) = TryInto::<TileType>::try_into(tile) else {
+                    continue;
+                };
+                let tile = Tile {
+                    state: TileState::Base,
+                    typ: tile_typ,
+                };
+
+                let eid = self.id_tile_map.len();
+                self.tile_pos_id_map.insert((x, h), eid);
+                self.id_tile_map.insert(eid, tile);
+            }
 
             self.src.push_str(line);
             // eprintln!("{line} ({w}, {h})");
@@ -118,13 +143,9 @@ impl Map<Uninit> {
                 continue;
             }
 
-            let Some((tile, src, idx)) = line.trim().split('\t').collect_tuple() else {
+            let Some((typ, lbl, state, src, idx)) = line.trim().split('\t').collect_tuple() else {
                 bail!("Invalid line format for {line}. Expects two columns, tilechar and path/rgb")
             };
-            let tile = tile
-                .chars()
-                .next()
-                .with_context(|| format!("No character in line, {line}"))?;
 
             // Check if RGB color or image texture
             let texture = if src.contains(',') {
@@ -137,7 +158,7 @@ impl Map<Uninit> {
             } else {
                 let path = std::path::PathBuf::from(src);
                 if !path.exists() {
-                    bail!("Invalid src ({src}) for tile, {tile}.");
+                    bail!("Invalid src ({src}) for {line}.");
                 }
 
                 let img = if let Some(img) = texture_cache.get(src) {
@@ -164,77 +185,75 @@ impl Map<Uninit> {
                 Texture::Sprite(DynamicImage::ImageRgba8(img_slice))
             };
 
-            if let Some(tile_src) = self.textures.tilemap.get_mut(&tile) {
-                *tile_src = texture
-            } else {
-                self.textures.tilemap.insert(tile.to_owned(), texture);
-            }
+            match typ {
+                "tile" => {
+                    let tiletype: TileType = TileType::from_str(lbl)?;
+                    let texture_state = TileState::from_str(state)?;
+
+                    if let Some(tile_src) = self.textures.tiles.get_mut(&tiletype) {
+                        tile_src.insert(texture_state, texture);
+                    } else {
+                        self.textures
+                            .tiles
+                            .insert(tiletype, HashMap::from_iter([(texture_state, texture)]));
+                    }
+                }
+                "enemy" => {
+                    let enemy: EnemyType = EnemyType::from_str(lbl)?;
+                    let texture_state = EnemyState::from_str(state)?;
+                    if let Some(ety_src) = self.textures.entities.get_mut(&enemy) {
+                        ety_src.insert(texture_state, texture);
+                    } else {
+                        self.textures
+                            .entities
+                            .insert(enemy, HashMap::from_iter([(texture_state, texture)]));
+                    }
+                }
+                _ => bail!("Invalid type. {typ}"),
+            };
         }
 
         Ok(self)
-    }
-
-    fn get_random_tilecolors(&self, seed: Option<u64>) -> Textures {
-        let mut rng = seed
-            .map(StdRng::seed_from_u64)
-            .unwrap_or_else(|| rand::make_rng());
-        Textures {
-            size: 0,
-            tilemap: self
-                .src
-                .chars()
-                .unique()
-                .map(|v| {
-                    let r: u8 = rng.random();
-                    let g: u8 = rng.random();
-                    let b: u8 = rng.random();
-                    (v, Texture::Color(Color::new(r, g, b, None)))
-                })
-                .collect(),
-        }
     }
 
     pub fn finish(self) -> eyre::Result<Map<Init>> {
         if self.src.is_empty() {
             bail!("Map not initialized")
         }
-        let textures = if self.textures.tilemap.is_empty() {
-            self.get_random_tilecolors(None)
-        } else {
-            self.textures
-        };
+        if self.textures.entities.is_empty() || self.textures.tiles.is_empty() {
+            bail!("Textures (entities or tiles) not initialized")
+        }
         Ok(Map {
             src: self.src,
             w: self.w,
             h: self.h,
-            textures,
-            entities: BTreeMap::new(),
+            textures: self.textures,
+            tile_pos_id_map: self.tile_pos_id_map,
+            id_tile_map: self.id_tile_map,
+            enemy_pos_id_map: self.enemy_pos_id_map,
+            id_enemy_map: self.id_enemy_map,
             _state: PhantomData,
         })
     }
 }
 
 impl Map<Init> {
-    pub fn tile<'src>(&'src self, x: usize, y: usize) -> Option<Tile<'src>> {
-        let idx = x + y * self.w;
-        self.src
-            .get(idx..idx + 1)
-            .and_then(|tile| tile.chars().next())
-            .and_then(|tile| {
-                self.textures.tilemap.get(&tile).map(|texture| Tile {
-                    icon: tile,
-                    texture,
-                })
-            })
+    pub fn tile(&self, x: usize, y: usize) -> Option<&Tile> {
+        self.tile_pos_id_map
+            .get(&(x, y))
+            .and_then(|id| self.id_tile_map.get(id))
     }
 
-    pub fn tiles<'src>(&'src self) -> impl Iterator<Item = (usize, usize, Option<Tile<'src>>)> {
+    pub fn tiles(&self) -> impl Iterator<Item = (usize, usize, Option<&Tile>)> {
         (0..self.h).flat_map(move |y| (0..self.w).map(move |x| (x, y, self.tile(x, y))))
     }
 
-    pub fn spawn_entity(&mut self, entity: impl Entity + 'static) {
-        let eid = self.entities.len();
-        self.entities.insert(eid, Box::new(entity));
+    pub fn spawn_enemy(&mut self, enemy: Enemy) {
+        let eid = self.id_enemy_map.len();
+        // TODO: This should change
+        self.enemy_pos_id_map
+            .insert((enemy.x as usize, enemy.y as usize), eid);
+        self.id_enemy_map.insert(eid, enemy);
     }
 
     // pub fn get_entity_by_id(&mut self, id: usize) -> Option<&mut Box<dyn Entity + 'static>> {
