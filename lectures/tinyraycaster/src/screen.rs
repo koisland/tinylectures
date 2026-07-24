@@ -8,6 +8,7 @@ use image::{DynamicImage, GenericImageView};
 
 use crate::{
     color::Color,
+    entity::Entity,
     map::{Init, Map, Texture, Tile},
     player::Player,
 };
@@ -55,6 +56,10 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         Ok(())
     }
 
+    pub fn draw_pixel(&mut self, x: usize, y: usize, color: Color) {
+        self.buffer[x + y * W] = color
+    }
+
     pub fn draw_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: Color) {
         // Loop thru length and width adding px by px.
         for i in 0..w {
@@ -65,7 +70,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
                 if cx >= W || cy >= H {
                     continue;
                 }
-                self.buffer[cx + cy * W] = color;
+                self.draw_pixel(cx, cy, color);
             }
         }
     }
@@ -81,7 +86,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
                     continue;
                 }
                 let [r, g, b, a] = image.get_pixel(i as u32, j as u32).0;
-                self.buffer[cx + cy * W] = Color::new(r, g, b, Some(a));
+                self.draw_pixel(cx, cy, Color::new(r, g, b, Some(a)));
             }
         }
     }
@@ -134,6 +139,45 @@ impl<const W: usize, const H: usize> Screen<W, H> {
             let x = (entity.x() * rect_w as f32) as usize;
             let y = (entity.y() * rect_h as f32) as usize;
             self.draw_rect(x, y, 5, 5, Color::new(255, 0, 0, None));
+        }
+    }
+
+    pub fn draw_sprite(&mut self, entity: &(impl Entity + ?Sized), player: &Player) {
+        // pythagorean theorem
+        let sprite_dst = ((player.x - entity.x()).powi(2) + (player.y - entity.y()).powi(2)).sqrt();
+
+        // Scale sprite by distance from player and clamp to 2000 if very close.
+        let sprite_screen_size = (H as f32 / sprite_dst).min(2000.) as usize;
+        let hscreen_width = W / 2;
+        let hscreen_height = H / 2;
+        let hsprite_screen_size = sprite_screen_size / 2;
+
+        // Get the upper left corner of the sprite
+        // TODO: Huh? Unclear why this works.
+        let h_offset_pt1 = (entity.angle() - player.ang) * hscreen_width as f32 / player.fov;
+        let h_offset_pt2 = (hscreen_width - hsprite_screen_size) as f32;
+        let h_offset = (h_offset_pt1 + h_offset_pt2) as usize;
+        let v_offset = hscreen_height - hsprite_screen_size;
+
+        for i in 0..sprite_screen_size {
+            let px_x = h_offset + i;
+            // Don't draw horizontal pixel if OOB
+            if px_x >= hscreen_width {
+                continue;
+            }
+            for j in 0..sprite_screen_size {
+                let px_y = v_offset + j;
+                if px_y >= H {
+                    continue;
+                }
+                self.draw_pixel(hscreen_width + px_x, px_y, Color::new(0, 0, 0, None));
+            }
+        }
+    }
+
+    pub fn draw_sprites(&mut self, map: &Map<Init>, player: &Player) {
+        for entity in map.entities.values() {
+            self.draw_sprite(entity.as_ref(), player);
         }
     }
 
@@ -291,7 +335,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
                             if pix_y >= H {
                                 continue;
                             }
-                            img.buffer[col_x + pix_y * W] = Color::new(r, g, b, Some(a))
+                            img.draw_pixel(col_x, pix_y, Color::new(r, g, b, Some(a)));
                         }
                     }
                 };
@@ -307,6 +351,8 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         self.draw_fov(player, map)?;
         // Then draw map and player.
         self.draw_map(player, map)?;
+        // And draw sprites
+        self.draw_sprites(map, player);
         Ok(())
     }
 }

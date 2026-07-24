@@ -4,5 +4,5 @@ pub trait Entity {
     /// Get y-position
     fn y(&self) -> f32;
     /// Get angle of entity
-    fn _angle(&self) -> f32;
+    fn angle(&self) -> f32;
 }

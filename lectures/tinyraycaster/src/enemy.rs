@@ -7,7 +7,7 @@ pub struct Enemy {
     /// y position
     pub y: f32,
     /// Angle of enemy
-    pub _angle: f32,
+    pub angle: f32,
     /// texture id on sprite sheet
     // TODO: Add field for front texture and back texture or hashmap of texture types (front, back, side,)
     pub _texture_id: usize,
@@ -22,7 +22,7 @@ impl Entity for Enemy {
         self.y
     }
 
-    fn _angle(&self) -> f32 {
-        self._angle
+    fn angle(&self) -> f32 {
+        self.angle
     }
 }
