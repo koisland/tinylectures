@@ -5,6 +5,7 @@ use crate::{
     map::Map,
     player::Player,
     screen::Screen,
+    textures::Textures,
 };
 
 mod color;
@@ -12,14 +13,15 @@ mod enemy;
 mod map;
 mod player;
 mod screen;
+mod textures;
 mod tiles;
 
 fn main() -> eyre::Result<()> {
     // Parse map.
-    let mut map = Map::new()
-        .with_map("lectures/tinyraycaster/data/map.txt")?
-        .with_textures("lectures/tinyraycaster/data/textures.tsv", 64)?
-        .finish()?;
+    let mut map = Map::new("lectures/tinyraycaster/data/map.txt")?;
+
+    let mut textures = Textures::new(64);
+    textures.load("lectures/tinyraycaster/data/textures.tsv")?;
 
     // With initialization function.
     let mut screen = Screen::<1024, 512>::new();
@@ -36,18 +38,10 @@ fn main() -> eyre::Result<()> {
         (5.323, 5.365, EnemyType::RedBlob, EnemyState::Injured),
         (4.123, 10.265, EnemyType::RedBlob, EnemyState::Injured),
     ] {
-        // https://www.youtube.com/watch?v=VMYk9fqXz_4
-        // https://stackoverflow.com/questions/283406/what-is-the-difference-between-atan-and-atan2-in-c
-        // Use atan2 incase where x is negative. Allows getting angle with range across all 4 quadrants as opposed to 2 (1 and 4).
-        let dst_y = y - player.y;
-        let dst_x = x - player.x;
-        // Angle of enemy relative to player
-        let angle = dst_y.atan2(dst_x);
-
         map.spawn_enemy(Enemy {
             x,
             y,
-            angle,
+            _angle: 0.,
             state,
             typ,
         });
@@ -58,7 +52,7 @@ fn main() -> eyre::Result<()> {
         let fname = outdir.join(format!("{i}.ppm"));
         player.ang += 2.0 * PI / 360.0;
         // Render frame
-        screen.render(&player, &map)?;
+        screen.render(&player, &map, &textures)?;
         // Before dumping to outfile.
         screen.dump(fname)?;
     }

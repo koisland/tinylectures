@@ -59,7 +59,7 @@ pub struct Enemy {
     pub y: f32,
     /// Angle of enemy
     // TODO: Determine if front or back texture based on player position
-    pub angle: f32,
+    pub _angle: f32,
     /// Current state
     #[allow(unused)]
     pub state: EnemyState,

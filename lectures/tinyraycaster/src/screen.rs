@@ -1,16 +1,19 @@
 use std::{
+    f32::consts::PI,
     fs::File,
     io::{BufWriter, Write},
     path::Path,
 };
 
+use eyre::bail;
 use image::{DynamicImage, GenericImageView};
 
 use crate::{
     color::Color,
     enemy::Enemy,
-    map::{Init, Map, Texture},
+    map::Map,
     player::Player,
+    textures::{Texture, Textures},
 };
 
 pub struct RayHit {
@@ -26,12 +29,17 @@ pub struct RayHit {
 // Access elems by specify w + (h * WIDTH)
 pub struct Screen<const W: usize, const H: usize> {
     buffer: Vec<Color>,
+    depth_buffer: Vec<f32>,
 }
 
 impl<const W: usize, const H: usize> Screen<W, H> {
     pub fn new() -> Self {
         let buffer = vec![Color::new(255, 255, 255, None); W * H];
-        Screen::<W, H> { buffer }
+        let depth_buffer = vec![1e3; W / 2];
+        Screen::<W, H> {
+            buffer,
+            depth_buffer,
+        }
     }
 
     pub fn clear(&mut self) {
@@ -92,7 +100,12 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     }
 
     // TODO: Maybe move to Map.
-    pub fn draw_map(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
+    pub fn draw_map(
+        &mut self,
+        player: &Player,
+        map: &Map,
+        textures: &Textures,
+    ) -> eyre::Result<()> {
         let rect_w = W / (map.w * 2);
         let rect_h = H / map.h;
         // eprintln!("Rects (w: {rect_w}, h: {rect_h})");
@@ -102,7 +115,9 @@ impl<const W: usize, const H: usize> Screen<W, H> {
                 // Because each rect is w and h
                 let rect_x = x * rect_w;
                 let rect_y = y * rect_h;
-                let texture = &map.textures.tiles[&tile.typ][&tile.state];
+                let Some(texture) = textures.get_tile(tile) else {
+                    bail!("Tile {tile:?} has no texture.")
+                };
 
                 // eprintln!("At ({x},{y}) draw {tile:?} tile at ({rect_x}, {rect_y}) ");
                 match texture {
@@ -124,7 +139,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     }
 
     // TODO: Refactor draw_* to take a struct that implents and Entity trait
-    pub fn draw_player_on_map(&mut self, player: &Player, map: &Map<Init>) {
+    pub fn draw_player_on_map(&mut self, player: &Player, map: &Map) {
         let rect_w = W / (map.w * 2);
         let rect_h = H / map.h;
         // Convert from coordinates to image dim
@@ -133,7 +148,7 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         self.draw_rect(x, y, 5, 5, Color::new(0, 0, 0, None));
     }
 
-    pub fn draw_entities_on_map(&mut self, map: &Map<Init>) {
+    pub fn draw_entities_on_map(&mut self, map: &Map) {
         let rect_w = W / (map.w * 2);
         let rect_h = H / map.h;
 
@@ -144,20 +159,41 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         }
     }
 
-    pub fn draw_sprite(&mut self, enemy: &Enemy, player: &Player) {
+    pub fn draw_sprite(
+        &mut self,
+        enemy: &Enemy,
+        player: &Player,
+        textures: &Textures,
+    ) -> eyre::Result<()> {
+        // https://www.youtube.com/watch?v=VMYk9fqXz_4
+        // https://stackoverflow.com/questions/283406/what-is-the-difference-between-atan-and-atan2-in-c
+        // Use atan2 incase where x is negative. Allows getting angle with range across all 4 quadrants as opposed to 2 (1 and 4).
+        let dst_y = enemy.y - player.y;
+        let dst_x = enemy.x - player.x;
+        // Angle of enemy relative to player
+        let mut angle = dst_y.atan2(dst_x);
+        while angle - player.ang > PI {
+            angle -= 2. * PI;
+        } // remove unncesessary periods from the relative direction
+        while angle - player.ang < -PI {
+            angle += 2. * PI;
+        }
+
         // pythagorean theorem
         let sprite_dst = ((player.x - enemy.x).powi(2) + (player.y - enemy.y).powi(2)).sqrt();
-
+        let Some(texture) = textures.get_enemy(enemy) else {
+            bail!("No texture for enemy {enemy:?}")
+        };
         // Scale sprite by distance from player and clamp to 2000 if very close.
-        let sprite_screen_size = (H as f32 / sprite_dst).min(2000.) as usize;
+        let sprite_screen_size = ((H as f32 / sprite_dst) as usize).min(1000);
         let hscreen_width = W / 2;
         let hscreen_height = H / 2;
         let hsprite_screen_size = sprite_screen_size / 2;
 
         // Get the upper left corner of the sprite
         // TODO: Huh? Unclear why this works.
-        let h_offset_pt1 = (enemy.angle - player.ang) * hscreen_width as f32 / player.fov;
-        let h_offset_pt2 = (hscreen_width - hsprite_screen_size) as f32;
+        let h_offset_pt1 = (angle - player.ang) / player.fov * hscreen_width as f32;
+        let h_offset_pt2 = (hscreen_width / 2 - textures.size / 2) as f32;
         let h_offset = (h_offset_pt1 + h_offset_pt2) as usize;
         let v_offset = hscreen_height - hsprite_screen_size;
 
@@ -167,20 +203,44 @@ impl<const W: usize, const H: usize> Screen<W, H> {
             if px_x >= hscreen_width {
                 continue;
             }
+            // Occluded. Pixel at x-pos in front of sprite (closer).
+            if self.depth_buffer[px_x] < sprite_dst {
+                continue;
+            }
+
             for j in 0..sprite_screen_size {
                 let px_y = v_offset + j;
                 if px_y >= H {
                     continue;
                 }
-                self.draw_pixel(hscreen_width + px_x, px_y, Color::new(0, 0, 0, None));
+                let Some(color) = texture.get_color(
+                    i * textures.size / sprite_screen_size,
+                    j * textures.size / sprite_screen_size,
+                ) else {
+                    bail!("No color.")
+                };
+
+                let (_, _, _, a) = color.channels();
+                // Only draw opaque pixels
+                // https://colorlabs.net/posts/what-are-alpha-channels-in-digital-images
+                if a > 128 {
+                    self.draw_pixel(hscreen_width + px_x, px_y, color);
+                }
             }
         }
+        Ok(())
     }
 
-    pub fn draw_sprites(&mut self, map: &Map<Init>, player: &Player) {
+    pub fn draw_sprites(
+        &mut self,
+        player: &Player,
+        map: &Map,
+        textures: &Textures,
+    ) -> eyre::Result<()> {
         for entity in map.id_enemy_map.values() {
-            self.draw_sprite(entity, player);
+            self.draw_sprite(entity, player, textures)?;
         }
+        Ok(())
     }
 
     /// # Drawing a ray.
@@ -212,7 +272,8 @@ impl<const W: usize, const H: usize> Screen<W, H> {
         x: f32,
         y: f32,
         ang: f32,
-        map: &Map<Init>,
+        map: &Map,
+        textures: &Textures,
         mut f_hit: impl FnMut(&mut Screen<W, H>, &Texture, RayHit),
     ) -> eyre::Result<f32> {
         let rect_w = (W / (map.w * 2)) as f32;
@@ -240,7 +301,9 @@ impl<const W: usize, const H: usize> Screen<W, H> {
             if let Some(htile) = map.tile(cx as usize, cy as usize) {
                 // Call function on hit.
                 // TODO: Abstract to function to handle cases where no key
-                let texture = &map.textures.tiles[&htile.typ][&htile.state];
+                let Some(texture) = &textures.get_tile(htile) else {
+                    bail!("No texture for hit tile {htile:?}")
+                };
                 f_hit(self, texture, RayHit { cx, cy, dst });
                 break;
             };
@@ -274,7 +337,12 @@ impl<const W: usize, const H: usize> Screen<W, H> {
     /// * They contain (signed) fractional parts of cx and cy (endpoint coordinates of the ray) from 0.5 to -0.5
     /// * The large magnitude indicates that it is the one hit. We can get the coordinate in sprite space as a result.
     /// * Then we draw it.
-    pub fn draw_fov(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
+    pub fn draw_fov(
+        &mut self,
+        player: &Player,
+        map: &Map,
+        textures: &Textures,
+    ) -> eyre::Result<()> {
         let fw: f32 = (W / 2) as f32;
         // Angle between x-axis and fov
         // Direction - (FOV / 2)
@@ -284,79 +352,89 @@ impl<const W: usize, const H: usize> Screen<W, H> {
             // (FOV * 0..512) / 512.
             let pt_2 = player.fov * (i as f32 / fw);
             let angle = pt_1 + pt_2;
-            self.draw_ray(player.x, player.y, angle, map, move |img, tile, ray_hit| {
-                // Closer means smaller c and thus large ht.
-                // We need to adjust this scaling to avoid fisheye distortion due to the ray hitting at multiple angles
-                // See https://gamedev.stackexchange.com/a/97580
-                // And https://lodev.org/cgtutor/raycasting.html
-                let col_ht = (H as f32 / (ray_hit.dst * (angle - player.ang).cos())) as usize;
-                // Draw at every angle within FOV
-                let col_x = W / 2 + i;
+            self.draw_ray(
+                player.x,
+                player.y,
+                angle,
+                map,
+                textures,
+                move |img, tile, ray_hit| {
+                    // Closer means smaller c and thus large ht.
+                    // We need to adjust this scaling to avoid fisheye distortion due to the ray hitting at multiple angles
+                    // See https://gamedev.stackexchange.com/a/97580
+                    // And https://lodev.org/cgtutor/raycasting.html
+                    let col_ht = (H as f32 / (ray_hit.dst * (angle - player.ang).cos())) as usize;
+                    // Draw at every angle within FOV
+                    let col_x = W / 2 + i;
 
-                // Draw texture/tile
-                match tile {
-                    Texture::Color(color) => {
-                        // Start at middle of screen and then drop y by half the col ht. This centers the drawn line.
-                        let col_y = H / 2 - col_ht / 2;
-                        img.draw_rect(col_x, col_y, 1, col_ht, *color);
-                    }
-                    Texture::Sprite(sprite) => {
-                        let size = sprite.height() as f32;
-                        // We need to know whether we hit the x or y side of the texture.
-                        // hitx and hity contain (signed) fractional parts of cx and cy from 0.5 to -0.5
-                        // If hity (fractional part of y) magnitude larger, then "vertical" part of tile hit.
-                        //  hitx             hity
-                        //  *
-                        // ______              ______
-                        // |    |            * |    |
-                        // |____|              |____|
-                        let hitx = ray_hit.cx - (ray_hit.cx + 0.5).floor();
-                        let hity = ray_hit.cy - (ray_hit.cy + 0.5).floor();
-                        // Once know part of texture was hit, we can get what part of sprite to render from the size and fraction.
-                        let mut x_texcoord = if hity.abs() > hitx.abs() {
-                            hity * size
-                        } else {
-                            hitx * size
-                        };
-                        if x_texcoord < 0.0 {
-                            x_texcoord += size
-                        }
-                        assert!(x_texcoord >= 0.0 && x_texcoord < size);
+                    // Store distance to know what to occlude from fov
+                    img.depth_buffer[i] = ray_hit.dst;
 
-                        // Scale column to height.
-                        let mut texcol = vec![];
-                        for y in 0..col_ht {
-                            let pix_y = (y as f32 * size) / col_ht as f32;
-                            // eprintln!("{y}*{size}/{col_ht}={pix_y}");
-                            texcol.push(sprite.get_pixel(x_texcoord as u32, pix_y as u32));
+                    // Draw texture/tile
+                    match tile {
+                        Texture::Color(color) => {
+                            // Start at middle of screen and then drop y by half the col ht. This centers the drawn line.
+                            let col_y = H / 2 - col_ht / 2;
+                            img.draw_rect(col_x, col_y, 1, col_ht, *color);
                         }
-                        // Write scaled column
-                        for (j, [r, g, b, a]) in
-                            texcol.iter().map(|px| px.0).enumerate().take(col_ht)
-                        {
-                            // Start at middle of screen ht, then half of the column ht. Add pixels to reach col_ht again.
-                            let pix_y = j + (H / 2) - (col_ht / 2);
-                            if pix_y >= H {
-                                continue;
+                        Texture::Sprite(sprite) => {
+                            let size = sprite.height() as f32;
+                            // We need to know whether we hit the x or y side of the texture.
+                            // hitx and hity contain (signed) fractional parts of cx and cy from 0.5 to -0.5
+                            // If hity (fractional part of y) magnitude larger, then "vertical" part of tile hit.
+                            //  hitx             hity
+                            //  *
+                            // ______              ______
+                            // |    |            * |    |
+                            // |____|              |____|
+                            let hitx = ray_hit.cx - (ray_hit.cx + 0.5).floor();
+                            let hity = ray_hit.cy - (ray_hit.cy + 0.5).floor();
+                            // Once know part of texture was hit, we can get what part of sprite to render from the size and fraction.
+                            let mut x_texcoord = if hity.abs() > hitx.abs() {
+                                hity * size
+                            } else {
+                                hitx * size
+                            };
+                            if x_texcoord < 0.0 {
+                                x_texcoord += size
                             }
-                            img.draw_pixel(col_x, pix_y, Color::new(r, g, b, Some(a)));
+                            assert!(x_texcoord >= 0.0 && x_texcoord < size);
+
+                            // Scale column to height.
+                            let mut texcol = vec![];
+                            for y in 0..col_ht {
+                                let pix_y = (y as f32 * size) / col_ht as f32;
+                                // eprintln!("{y}*{size}/{col_ht}={pix_y}");
+                                texcol.push(sprite.get_pixel(x_texcoord as u32, pix_y as u32));
+                            }
+                            // Write scaled column
+                            for (j, [r, g, b, a]) in
+                                texcol.iter().map(|px| px.0).enumerate().take(col_ht)
+                            {
+                                // Start at middle of screen ht, then half of the column ht. Add pixels to reach col_ht again.
+                                let pix_y = j + (H / 2) - (col_ht / 2);
+                                if pix_y >= H {
+                                    continue;
+                                }
+                                img.draw_pixel(col_x, pix_y, Color::new(r, g, b, Some(a)));
+                            }
                         }
-                    }
-                };
-            })?;
+                    };
+                },
+            )?;
         }
         Ok(())
     }
 
-    pub fn render(&mut self, player: &Player, map: &Map<Init>) -> eyre::Result<()> {
+    pub fn render(&mut self, player: &Player, map: &Map, textures: &Textures) -> eyre::Result<()> {
         // Clear buffer
         self.clear();
         // Draw fov for player
-        self.draw_fov(player, map)?;
+        self.draw_fov(player, map, textures)?;
         // Then draw map and player.
-        self.draw_map(player, map)?;
+        self.draw_map(player, map, textures)?;
         // And draw sprites
-        self.draw_sprites(map, player);
+        self.draw_sprites(player, map, textures)?;
         Ok(())
     }
 }
